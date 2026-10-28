@@ -8,7 +8,13 @@
     lineBase: 100,
     extraLineMultiplier: 0.5
   });
-  const COLORS = ["#9b7cff", "#ff9475", "#5fd1c5", "#f7c85f", "#68a7ff", "#ed78ad"];
+  const PALETTES = {
+    neon:   ["#9b7cff", "#ff9475", "#5fd1c5", "#f7c85f", "#68a7ff", "#ed78ad"],
+    pastel: ["#c4a8ff", "#ffb8a0", "#a0e8dd", "#ffe08a", "#a8c8ff", "#ffb8d8"],
+    forest: ["#7fb069", "#d4a373", "#588157", "#e9c46a", "#457b9d", "#a8dadc"],
+    mono:   ["#6b7280", "#9ca3af", "#d1d5db", "#4b5563", "#f3f4f6", "#374151"]
+  };
+  let COLORS = PALETTES.neon.slice();
   const SHAPES = [
     [[0, 0]],
     [[0, 0], [0, 1]],
@@ -32,6 +38,20 @@
     [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]],
     [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]
   ];
+  const ACHIEVEMENTS = [
+    { id: "first_line",   icon: "🎯", title: "Первая линия",    desc: "Снесите одну линию" },
+    { id: "double_line",  icon: "✌️", title: "Двойное",         desc: "Снесите 2 линии за ход" },
+    { id: "triple_line",  icon: "🔥", title: "Тройное",         desc: "Снесите 3 линии за ход" },
+    { id: "score_500",    icon: "⭐", title: "500 очков",       desc: "Наберите 500 очков за партию" },
+    { id: "score_1500",   icon: "🌟", title: "1500 очков",      desc: "Наберите 1500 очков за партию" },
+    { id: "score_3000",   icon: "💎", title: "3000 очков",      desc: "Наберите 3000 очков за партию" },
+    { id: "games_10",     icon: "🎮", title: "10 партий",       desc: "Сыграйте 10 партий" },
+    { id: "games_50",     icon: "🏅", title: "50 партий",       desc: "Сыграйте 50 партий" },
+    { id: "lines_50",     icon: "📏", title: "50 линий",        desc: "Снесите 50 линий всего" },
+    { id: "lines_200",    icon: "🧱", title: "200 линий",       desc: "Снесите 200 линий всего" },
+    { id: "combo_master", icon: "🎪", title: "Комбо-мастер",    desc: "Снесите 2+ линии 5 раз за партию" },
+    { id: "night_owl",    icon: "🌙", title: "Полночный игрок", desc: "Сыграйте партию после полуночи" }
+  ];
 
   const boardElement = document.querySelector("#board");
   const rackElement = document.querySelector("#piece-rack");
@@ -41,6 +61,11 @@
   const overlayElement = document.querySelector("#board-overlay");
   const toastElement = document.querySelector("#toast");
   const turnHintElement = document.querySelector("#turn-hint");
+  const particlesLayer = document.querySelector("#particles-layer");
+  const paletteButton = document.querySelector("#palette-toggle");
+  const achievementsModal = document.querySelector("#achievements-modal");
+  const achievementsList = document.querySelector("#achievements-list");
+  const achievementToasts = document.querySelector("#achievement-toasts");
   const cells = [];
 
   let board = createEmptyBoard();
@@ -55,6 +80,11 @@
   let suppressBoardClick = false;
   let audioContext = null;
   let toastTimer = 0;
+  let paletteName = "neon";
+  let paletteMenu = null;
+  let unlockedAchievements = [];
+  let sessionLineCount = 0;
+  let sessionComboCount = 0;
 
   function createEmptyBoard() {
     return Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
@@ -66,6 +96,13 @@
       best = Number.isFinite(saved.best) && saved.best >= 0 ? saved.best : 0;
       soundEnabled = saved.sound === true;
       gamesPlayed = Number.isInteger(saved.gamesPlayed) && saved.gamesPlayed >= 0 ? saved.gamesPlayed : 0;
+      if (typeof saved.palette === "string" && PALETTES[saved.palette]) {
+        paletteName = saved.palette;
+        COLORS = PALETTES[paletteName].slice();
+      }
+      if (Array.isArray(saved.achievements)) {
+        unlockedAchievements = saved.achievements.filter((id) => ACHIEVEMENTS.some((a) => a.id === id));
+      }
     } catch (error) {
       console.warn("Не удалось прочитать сохранённые данные игры.", error);
     }
@@ -76,7 +113,11 @@
 
   function saveSettings() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ best, sound: soundEnabled, gamesPlayed }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        best, sound: soundEnabled, gamesPlayed,
+        palette: paletteName, achievements: unlockedAchievements,
+        board, pieces, score
+      }));
     } catch (error) {
       console.warn("Не удалось сохранить данные игры.", error);
     }
@@ -184,7 +225,6 @@
     turnHintElement.textContent = "Теперь коснитесь клетки поля";
   }
 
-  // Validate every block before mutating the board, keeping failed drops atomic.
   function canPlace(shape, originRow, originCol) {
     return shape.every(([row, col]) => {
       const targetRow = originRow + row;
@@ -209,7 +249,6 @@
   }
 
   function getCellAtPoint(clientX, clientY) {
-    // Convert viewport coordinates to a board cell without relying on pointer targets.
     const rect = boardElement.getBoundingClientRect();
     if (clientX < rect.left || clientX >= rect.right || clientY < rect.top || clientY >= rect.bottom) return null;
     const style = getComputedStyle(boardElement);
@@ -261,7 +300,6 @@
   }
 
   function calculateClears() {
-    // Find complete lines from the same post-placement board, then clear their union.
     const rows = [];
     const cols = [];
     for (let row = 0; row < SIZE; row += 1) {
@@ -286,6 +324,135 @@
     if (showBonus) showToast(`+${points}`);
     updateScoreDisplay();
     saveSettings();
+  }
+
+  // Spawn short-lived square particles at the center of each cleared cell.
+  function spawnParticles(cellIndices) {
+    if (!particlesLayer) return;
+    const frameRect = particlesLayer.getBoundingClientRect();
+    cellIndices.forEach((cellIndex) => {
+      const row = Math.floor(cellIndex / SIZE);
+      const col = cellIndex % SIZE;
+      const color = board[row][col];
+      if (!color) return;
+      const cellRect = cells[cellIndex].getBoundingClientRect();
+      const cx = cellRect.left - frameRect.left + cellRect.width / 2;
+      const cy = cellRect.top - frameRect.top + cellRect.height / 2;
+      for (let i = 0; i < 4; i += 1) {
+        const p = document.createElement("span");
+        p.className = "particle";
+        p.style.background = color;
+        p.style.left = `${cx - 4}px`;
+        p.style.top = `${cy - 4}px`;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 20 + Math.random() * 40;
+        p.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
+        p.style.setProperty("--dy", `${Math.sin(angle) * dist}px`);
+        p.style.animationDelay = `${Math.random() * 60}ms`;
+        particlesLayer.append(p);
+        window.setTimeout(() => p.remove(), 700);
+      }
+    });
+  }
+
+  // ===== Палитра =====
+  function buildPaletteMenu() {
+    paletteMenu = document.createElement("div");
+    paletteMenu.className = "palette-menu";
+    const labels = { neon: "Neon", pastel: "Pastel", forest: "Forest", mono: "Mono" };
+    Object.entries(PALETTES).forEach(([name, colors]) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "palette-option" + (name === paletteName ? " active" : "");
+      btn.dataset.palette = name;
+      btn.innerHTML = `<span class="palette-swatches">${colors.map((c) => `<i style="background:${c}"></i>`).join("")}</span><span>${labels[name]}</span>`;
+      btn.addEventListener("click", () => applyPalette(name));
+      paletteMenu.append(btn);
+    });
+    document.body.append(paletteMenu);
+    document.addEventListener("click", (event) => {
+      if (!paletteMenu.classList.contains("visible")) return;
+      if (event.target.closest("#palette-toggle")) return;
+      if (event.target.closest(".palette-menu")) return;
+      paletteMenu.classList.remove("visible");
+    });
+  }
+
+  function applyPalette(name) {
+    if (!PALETTES[name]) return;
+    paletteName = name;
+    COLORS = PALETTES[name].slice();
+    cells.forEach((cell, index) => {
+      const row = Math.floor(index / SIZE);
+      const col = index % SIZE;
+      if (board[row][col]) {
+        const idx = COLORS.indexOf(board[row][col]);
+        if (idx >= 0) cell.style.setProperty("--cell-color", COLORS[idx]);
+      }
+    });
+    pieces.forEach((piece, index) => {
+      const btn = rackElement.querySelector(`.piece-button[data-index="${index}"]`);
+      if (!btn) return;
+      const idx = COLORS.indexOf(piece.color);
+      if (idx >= 0) {
+        piece.color = COLORS[idx];
+        btn.style.setProperty("--piece-color", piece.color);
+      }
+    });
+    paletteMenu?.querySelectorAll(".palette-option").forEach((el) => {
+      el.classList.toggle("active", el.dataset.palette === name);
+    });
+    paletteMenu?.classList.remove("visible");
+    saveSettings();
+    showToast(`Палитра: ${({ neon: "Neon", pastel: "Pastel", forest: "Forest", mono: "Mono" })[name]}`);
+  }
+
+  // ===== Достижения =====
+  function renderAchievementsList() {
+    if (!achievementsList) return;
+    achievementsList.replaceChildren();
+    ACHIEVEMENTS.forEach((ach) => {
+      const unlocked = unlockedAchievements.includes(ach.id);
+      const item = document.createElement("div");
+      item.className = "achievement-item" + (unlocked ? " unlocked" : "");
+      item.innerHTML = `<span class="achievement-icon">${ach.icon}</span><div class="achievement-text"><strong>${ach.title}</strong><span>${ach.desc}</span></div><span>${unlocked ? "✓" : "🔒"}</span>`;
+      achievementsList.append(item);
+    });
+  }
+
+  function unlockAchievement(id) {
+    if (unlockedAchievements.includes(id)) return;
+    const ach = ACHIEVEMENTS.find((a) => a.id === id);
+    if (!ach) return;
+    unlockedAchievements.push(id);
+    saveSettings();
+    showAchievementToast(ach);
+    renderAchievementsList();
+  }
+
+  function showAchievementToast(ach) {
+    if (!achievementToasts) return;
+    const toast = document.createElement("div");
+    toast.className = "achievement-toast";
+    toast.innerHTML = `<span class="icon">${ach.icon}</span><div class="body"><strong>Достижение!</strong><span>${ach.title}</span></div>`;
+    achievementToasts.append(toast);
+    window.setTimeout(() => toast.remove(), 3000);
+  }
+
+  function checkAchievements(context) {
+    const { lineCount = 0, isNewGame = false, isNight = false } = context || {};
+    if (lineCount >= 1) unlockAchievement("first_line");
+    if (lineCount >= 2) unlockAchievement("double_line");
+    if (lineCount >= 3) unlockAchievement("triple_line");
+    if (score >= 500) unlockAchievement("score_500");
+    if (score >= 1500) unlockAchievement("score_1500");
+    if (score >= 3000) unlockAchievement("score_3000");
+    if (gamesPlayed >= 10) unlockAchievement("games_10");
+    if (gamesPlayed >= 50) unlockAchievement("games_50");
+    if (sessionLineCount >= 50) unlockAchievement("lines_50");
+    if (sessionLineCount >= 200) unlockAchievement("lines_200");
+    if (isNewGame && isNight) unlockAchievement("night_owl");
+    if (isNewGame) { sessionLineCount = 0; sessionComboCount = 0; }
   }
 
   function showToast(message) {
@@ -320,7 +487,6 @@
   }
 
   function placePiece(index, originRow, originCol) {
-    // A successful drop is committed once; invalid drops leave score and board untouched.
     if (locked || !pieces[index] || pieces[index].used) return false;
     const piece = pieces[index];
     if (!canPlace(piece.shape, originRow, originCol)) {
@@ -345,7 +511,10 @@
 
     if (clears.clearSet.size > 0) {
       locked = true;
+      spawnParticles([...clears.clearSet]);
       clears.clearSet.forEach((cellIndex) => cells[cellIndex].classList.add("clearing"));
+      sessionLineCount += clears.lineCount;
+      if (clears.lineCount >= 2) sessionComboCount += 1;
       window.setTimeout(() => {
         clears.clearSet.forEach((cellIndex) => {
           const row = Math.floor(cellIndex / SIZE);
@@ -355,6 +524,8 @@
         renderBoard();
         finishPlacement();
       }, 240);
+      if (sessionComboCount >= 5) unlockAchievement("combo_master");
+      checkAchievements({ lineCount: clears.lineCount });
     } else {
       renderBoard();
       finishPlacement();
@@ -389,6 +560,8 @@
     pointerDrag = null;
     selectedIndex = -1;
     gamesPlayed += 1;
+    sessionLineCount = 0;
+    sessionComboCount = 0;
     overlayElement.classList.remove("visible");
     overlayElement.setAttribute("aria-hidden", "true");
     clearPreview();
@@ -396,6 +569,8 @@
     generatePieces();
     turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
     saveSettings();
+    checkAchievements({ isNewGame: true, isNight: new Date().getHours() < 5 || new Date().getHours() >= 23 });
+    renderAchievementsList();
   }
 
   function onPiecePointerDown(event) {
@@ -480,5 +655,26 @@
     saveSettings();
     if (soundEnabled) playTone(620);
   });
+
+  buildPaletteMenu();
+  paletteButton?.addEventListener("click", () => {
+    if (paletteMenu) paletteMenu.classList.toggle("visible");
+  });
+  document.querySelector("#achievements-open")?.addEventListener("click", () => {
+    renderAchievementsList();
+    achievementsModal.classList.add("visible");
+    achievementsModal.setAttribute("aria-hidden", "false");
+  });
+  document.querySelector("#achievements-close")?.addEventListener("click", () => {
+    achievementsModal.classList.remove("visible");
+    achievementsModal.setAttribute("aria-hidden", "true");
+  });
+  achievementsModal?.addEventListener("click", (event) => {
+    if (event.target === achievementsModal) {
+      achievementsModal.classList.remove("visible");
+      achievementsModal.setAttribute("aria-hidden", "true");
+    }
+  });
+
   registerServiceWorker();
 })();
