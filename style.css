@@ -370,13 +370,7 @@ button { font: inherit; }
 @keyframes toast-in { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes toast-out { to { transform: translateY(-20px); opacity: 0; } }
 
-/* ===== Фикс для iOS Safari ===== */
-.board-frame, .board {
-  -webkit-transform: translate3d(0,0,0);
-  transform: translate3d(0,0,0);
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-}
+
 
 @media (max-height: 730px) {
   .app-shell { padding-top: calc(8px + var(--safe-top)); padding-bottom: calc(8px + var(--safe-bottom)); }
