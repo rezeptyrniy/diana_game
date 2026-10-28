@@ -63,6 +63,7 @@
             <button class="primary-button" id="overlay-restart" type="button">Сыграть ещё</button>
           </div>
         </div>
+        <div class="particles-layer" id="particles-layer" aria-hidden="true"></div>
       </div>
       <div class="toast" id="toast" aria-live="polite"></div>
     </section>
@@ -70,12 +71,23 @@
     <section class="pieces-section" aria-label="Доступные фигуры">
       <div class="pieces-heading">
         <span class="eyebrow">ВАШИ ФИГУРЫ</span>
+        <button class="achievements-link" id="achievements-open" type="button">🏆 Достижения</button>
         <span class="turn-hint" id="turn-hint">Перетащите на поле или выберите и коснитесь клетки</span>
       </div>
       <div class="piece-rack" id="piece-rack"></div>
     </section>
 
     <footer class="footer-note">Заполняйте линии и освобождайте место</footer>
+    <div class="achievements-modal" id="achievements-modal" aria-hidden="true">
+      <div class="achievements-card">
+        <div class="achievements-head">
+          <h2>Достижения</h2>
+          <button class="icon-button" id="achievements-close" type="button" aria-label="Закрыть">✕</button>
+        </div>
+        <div class="achievements-list" id="achievements-list"></div>
+      </div>
+    </div>
+    <div class="achievement-toasts" id="achievement-toasts" aria-live="polite"></div>
   </main>
   <script src="./game.js" defer></script>
 </body>
