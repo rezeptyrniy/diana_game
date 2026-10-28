@@ -1,0 +1,484 @@
+"use strict";
+
+(() => {
+  const SIZE = 10;
+  const STORAGE_KEY = "luma-blocks-save-v1";
+  const SCORE_CONFIG = Object.freeze({
+    pointsPerBlock: 10,
+    lineBase: 100,
+    extraLineMultiplier: 0.5
+  });
+  const COLORS = ["#9b7cff", "#ff9475", "#5fd1c5", "#f7c85f", "#68a7ff", "#ed78ad"];
+  const SHAPES = [
+    [[0, 0]],
+    [[0, 0], [0, 1]],
+    [[0, 0], [0, 1], [0, 2]],
+    [[0, 0], [1, 0], [2, 0]],
+    [[0, 0], [0, 1], [0, 2], [0, 3]],
+    [[0, 0], [1, 0], [2, 0], [3, 0]],
+    [[0, 0], [0, 1], [1, 0], [1, 1]],
+    [[0, 0], [0, 1], [0, 2], [1, 0]],
+    [[0, 0], [0, 1], [0, 2], [1, 2]],
+    [[0, 0], [1, 0], [1, 1], [1, 2]],
+    [[0, 2], [1, 0], [1, 1], [1, 2]],
+    [[0, 0], [1, 0], [2, 0], [2, 1]],
+    [[0, 1], [1, 1], [2, 0], [2, 1]],
+    [[0, 0], [0, 1], [0, 2], [1, 1]],
+    [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]],
+    [[0, 0], [0, 1], [1, 1], [1, 2]],
+    [[0, 1], [0, 2], [1, 0], [1, 1]],
+    [[0, 0], [1, 0], [1, 1], [2, 1]],
+    [[0, 1], [1, 0], [1, 1], [2, 0]],
+    [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]],
+    [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]
+  ];
+
+  const boardElement = document.querySelector("#board");
+  const rackElement = document.querySelector("#piece-rack");
+  const scoreElement = document.querySelector("#score");
+  const bestElement = document.querySelector("#best-score");
+  const soundButton = document.querySelector("#sound-toggle");
+  const overlayElement = document.querySelector("#board-overlay");
+  const toastElement = document.querySelector("#toast");
+  const turnHintElement = document.querySelector("#turn-hint");
+  const cells = [];
+
+  let board = createEmptyBoard();
+  let pieces = [];
+  let selectedIndex = -1;
+  let score = 0;
+  let best = 0;
+  let soundEnabled = false;
+  let gamesPlayed = 0;
+  let locked = false;
+  let pointerDrag = null;
+  let suppressBoardClick = false;
+  let audioContext = null;
+  let toastTimer = 0;
+
+  function createEmptyBoard() {
+    return Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
+  }
+
+  function loadSavedSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      best = Number.isFinite(saved.best) && saved.best >= 0 ? saved.best : 0;
+      soundEnabled = saved.sound === true;
+      gamesPlayed = Number.isInteger(saved.gamesPlayed) && saved.gamesPlayed >= 0 ? saved.gamesPlayed : 0;
+    } catch (error) {
+      console.warn("Не удалось прочитать сохранённые данные игры.", error);
+    }
+    bestElement.textContent = String(best);
+    soundButton.setAttribute("aria-pressed", String(soundEnabled));
+    soundButton.setAttribute("aria-label", soundEnabled ? "Выключить звук" : "Включить звук");
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ best, sound: soundEnabled, gamesPlayed }));
+    } catch (error) {
+      console.warn("Не удалось сохранить данные игры.", error);
+    }
+  }
+
+  function createBoardCells() {
+    const fragment = document.createDocumentFragment();
+    for (let row = 0; row < SIZE; row += 1) {
+      for (let col = 0; col < SIZE; col += 1) {
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "board-cell";
+        cell.setAttribute("role", "gridcell");
+        cell.setAttribute("aria-label", `Строка ${row + 1}, столбец ${col + 1}`);
+        cell.dataset.row = String(row);
+        cell.dataset.col = String(col);
+        fragment.append(cell);
+        cells.push(cell);
+      }
+    }
+    boardElement.append(fragment);
+  }
+
+  function randomPiece() {
+    const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+    return {
+      shape: shape.map(([row, col]) => [row, col]),
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      used: false
+    };
+  }
+
+  function generatePieces() {
+    pieces = Array.from({ length: 3 }, randomPiece);
+    selectedIndex = -1;
+    renderPieces();
+  }
+
+  function renderPieces() {
+    rackElement.replaceChildren();
+    pieces.forEach((piece, index) => {
+      const slot = document.createElement("div");
+      slot.className = "piece-slot";
+      if (piece.used) slot.classList.add("used");
+      if (index === selectedIndex) slot.classList.add("selected");
+      slot.dataset.index = String(index);
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "piece-button";
+      button.setAttribute("aria-label", piece.used ? "Фигура использована" : `Выбрать фигуру ${index + 1}`);
+      button.setAttribute("aria-pressed", String(index === selectedIndex));
+      button.dataset.index = String(index);
+      button.style.setProperty("--piece-color", piece.color);
+
+      const height = Math.max(...piece.shape.map(([row]) => row)) + 1;
+      const width = Math.max(...piece.shape.map(([, col]) => col)) + 1;
+      const shape = document.createElement("span");
+      shape.className = "piece-shape";
+      shape.style.gridTemplateColumns = `repeat(${width}, auto)`;
+      shape.style.gridTemplateRows = `repeat(${height}, auto)`;
+      const occupied = new Set(piece.shape.map(([row, col]) => `${row}:${col}`));
+      for (let row = 0; row < height; row += 1) {
+        for (let col = 0; col < width; col += 1) {
+          const block = document.createElement("i");
+          block.className = `piece-cell${occupied.has(`${row}:${col}`) ? "" : " empty"}`;
+          block.dataset.row = String(row);
+          block.dataset.col = String(col);
+          shape.append(block);
+        }
+      }
+      button.append(shape);
+      slot.append(button);
+      rackElement.append(slot);
+    });
+  }
+
+  function renderBoard() {
+    cells.forEach((cell, index) => {
+      const row = Math.floor(index / SIZE);
+      const col = index % SIZE;
+      cell.classList.remove("filled", "preview-valid", "preview-invalid", "clearing");
+      cell.style.removeProperty("--cell-color");
+      if (board[row][col]) {
+        cell.classList.add("filled");
+        cell.style.setProperty("--cell-color", board[row][col]);
+      }
+    });
+    updateScoreDisplay();
+  }
+
+  function updateScoreDisplay() {
+    scoreElement.textContent = String(score);
+    bestElement.textContent = String(best);
+  }
+
+  function selectPiece(index) {
+    if (locked || !pieces[index] || pieces[index].used) return;
+    selectedIndex = index;
+    Array.from(rackElement.children).forEach((slot, slotIndex) => {
+      slot.classList.toggle("selected", slotIndex === selectedIndex);
+      slot.querySelector(".piece-button")
+        .setAttribute("aria-pressed", String(slotIndex === selectedIndex));
+    });
+    turnHintElement.textContent = "Теперь коснитесь клетки поля";
+  }
+
+  // Validate every block before mutating the board, keeping failed drops atomic.
+  function canPlace(shape, originRow, originCol) {
+    return shape.every(([row, col]) => {
+      const targetRow = originRow + row;
+      const targetCol = originCol + col;
+      return targetRow >= 0 && targetRow < SIZE
+        && targetCol >= 0 && targetCol < SIZE
+        && board[targetRow][targetCol] === null;
+    });
+  }
+
+  function hasAnyPlacement(shape) {
+    for (let row = 0; row < SIZE; row += 1) {
+      for (let col = 0; col < SIZE; col += 1) {
+        if (canPlace(shape, row, col)) return true;
+      }
+    }
+    return false;
+  }
+
+  function hasAvailableMove() {
+    return pieces.some((piece) => !piece.used && hasAnyPlacement(piece.shape));
+  }
+
+  function getCellAtPoint(clientX, clientY) {
+    // Convert viewport coordinates to a board cell without relying on pointer targets.
+    const rect = boardElement.getBoundingClientRect();
+    if (clientX < rect.left || clientX >= rect.right || clientY < rect.top || clientY >= rect.bottom) return null;
+    const style = getComputedStyle(boardElement);
+    const gap = parseFloat(style.gap) || 0;
+    const cellSize = (rect.width - gap * (SIZE - 1)) / SIZE;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const col = Math.floor(x / (cellSize + gap));
+    const row = Math.floor(y / (cellSize + gap));
+    if (row < 0 || row >= SIZE || col < 0 || col >= SIZE) return null;
+    const withinCol = x - col * (cellSize + gap);
+    const withinRow = y - row * (cellSize + gap);
+    if (withinCol > cellSize || withinRow > cellSize) return null;
+    return { row, col };
+  }
+
+  function showPreview(originRow, originCol, piece) {
+    clearPreview();
+    const valid = canPlace(piece.shape, originRow, originCol);
+    piece.shape.forEach(([row, col]) => {
+      const targetRow = originRow + row;
+      const targetCol = originCol + col;
+      if (targetRow < 0 || targetRow >= SIZE || targetCol < 0 || targetCol >= SIZE) return;
+      const cell = cells[targetRow * SIZE + targetCol];
+      cell.classList.add(valid ? "preview-valid" : "preview-invalid");
+      if (valid) cell.style.setProperty("--preview-color", piece.color);
+    });
+  }
+
+  function clearPreview() {
+    cells.forEach((cell) => {
+      cell.classList.remove("preview-valid", "preview-invalid");
+      cell.style.removeProperty("--preview-color");
+    });
+  }
+
+  function updateDragPreview(clientX, clientY) {
+    const point = getCellAtPoint(clientX, clientY);
+    const piece = pointerDrag && pieces[pointerDrag.index];
+    if (!point || !piece) {
+      clearPreview();
+      pointerDrag.overBoard = false;
+      return;
+    }
+    pointerDrag.overBoard = true;
+    pointerDrag.originRow = point.row - pointerDrag.anchorRow;
+    pointerDrag.originCol = point.col - pointerDrag.anchorCol;
+    showPreview(pointerDrag.originRow, pointerDrag.originCol, piece);
+  }
+
+  function calculateClears() {
+    // Find complete lines from the same post-placement board, then clear their union.
+    const rows = [];
+    const cols = [];
+    for (let row = 0; row < SIZE; row += 1) {
+      if (board[row].every(Boolean)) rows.push(row);
+    }
+    for (let col = 0; col < SIZE; col += 1) {
+      if (board.every((row) => Boolean(row[col]))) cols.push(col);
+    }
+    const clearSet = new Set();
+    rows.forEach((row) => {
+      for (let col = 0; col < SIZE; col += 1) clearSet.add(row * SIZE + col);
+    });
+    cols.forEach((col) => {
+      for (let row = 0; row < SIZE; row += 1) clearSet.add(row * SIZE + col);
+    });
+    return { rows, cols, clearSet, lineCount: rows.length + cols.length };
+  }
+
+  function addPoints(points, showBonus) {
+    score += points;
+    if (score > best) best = score;
+    if (showBonus) showToast(`+${points}`);
+    updateScoreDisplay();
+    saveSettings();
+  }
+
+  function showToast(message) {
+    window.clearTimeout(toastTimer);
+    toastElement.textContent = message;
+    toastElement.classList.remove("show");
+    void toastElement.offsetWidth;
+    toastElement.classList.add("show");
+    toastTimer = window.setTimeout(() => toastElement.classList.remove("show"), 950);
+  }
+
+  function playTone(frequency, duration = 0.09) {
+    if (!soundEnabled) return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    try {
+      audioContext ||= new AudioContextClass();
+      if (audioContext.state === "suspended") audioContext.resume();
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.055, audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + duration);
+    } catch (error) {
+      console.warn("Не удалось воспроизвести звук.", error);
+    }
+  }
+
+  function placePiece(index, originRow, originCol) {
+    // A successful drop is committed once; invalid drops leave score and board untouched.
+    if (locked || !pieces[index] || pieces[index].used) return false;
+    const piece = pieces[index];
+    if (!canPlace(piece.shape, originRow, originCol)) {
+      showPreview(originRow, originCol, piece);
+      window.setTimeout(clearPreview, 260);
+      return false;
+    }
+
+    piece.shape.forEach(([row, col]) => {
+      board[originRow + row][originCol + col] = piece.color;
+    });
+    piece.used = true;
+    selectedIndex = -1;
+    const placedPoints = piece.shape.length * SCORE_CONFIG.pointsPerBlock;
+    const clears = calculateClears();
+    const bonus = clears.lineCount === 0
+      ? 0
+      : Math.round(SCORE_CONFIG.lineBase * clears.lineCount
+        * (1 + SCORE_CONFIG.extraLineMultiplier * (clears.lineCount - 1)));
+    addPoints(placedPoints + bonus, clears.lineCount > 0);
+    playTone(clears.lineCount > 0 ? 740 : 480, clears.lineCount > 0 ? 0.16 : 0.08);
+
+    if (clears.clearSet.size > 0) {
+      locked = true;
+      clears.clearSet.forEach((cellIndex) => cells[cellIndex].classList.add("clearing"));
+      window.setTimeout(() => {
+        clears.clearSet.forEach((cellIndex) => {
+          const row = Math.floor(cellIndex / SIZE);
+          const col = cellIndex % SIZE;
+          board[row][col] = null;
+        });
+        renderBoard();
+        finishPlacement();
+      }, 240);
+    } else {
+      renderBoard();
+      finishPlacement();
+    }
+    renderPieces();
+    return true;
+  }
+
+  function finishPlacement() {
+    locked = false;
+    if (pieces.every((piece) => piece.used)) {
+      generatePieces();
+    } else {
+      renderPieces();
+    }
+    turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
+    if (!hasAvailableMove()) endGame();
+  }
+
+  function endGame() {
+    document.querySelector("#overlay-title").textContent = "Партия окончена";
+    document.querySelector("#overlay-message").textContent = `Ваш счёт — ${score}. Сыграно партий: ${gamesPlayed}.`;
+    document.querySelector("#overlay-icon").textContent = "✦";
+    overlayElement.classList.add("visible");
+    overlayElement.setAttribute("aria-hidden", "false");
+  }
+
+  function startNewGame() {
+    board = createEmptyBoard();
+    score = 0;
+    locked = false;
+    pointerDrag = null;
+    selectedIndex = -1;
+    gamesPlayed += 1;
+    overlayElement.classList.remove("visible");
+    overlayElement.setAttribute("aria-hidden", "true");
+    clearPreview();
+    renderBoard();
+    generatePieces();
+    turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
+    saveSettings();
+  }
+
+  function onPiecePointerDown(event) {
+    const button = event.target.closest(".piece-button");
+    if (!button || event.button !== 0 || locked) return;
+    const index = Number(button.dataset.index);
+    const piece = pieces[index];
+    if (!piece || piece.used) return;
+    event.preventDefault();
+    const block = event.target.closest(".piece-cell:not(.empty)");
+    pointerDrag = {
+      pointerId: event.pointerId,
+      index,
+      startX: event.clientX,
+      startY: event.clientY,
+      anchorRow: block ? Number(block.dataset.row) : 0,
+      anchorCol: block ? Number(block.dataset.col) : 0,
+      dragging: false,
+      overBoard: false,
+      originRow: 0,
+      originCol: 0
+    };
+    selectPiece(index);
+  }
+
+  function onPointerMove(event) {
+    if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+    const delta = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
+    if (!pointerDrag.dragging && delta < 6) return;
+    pointerDrag.dragging = true;
+    event.preventDefault();
+    document.body.classList.add("dragging");
+    updateDragPreview(event.clientX, event.clientY);
+  }
+
+  function onPointerUp(event) {
+    if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+    const drag = pointerDrag;
+    pointerDrag = null;
+    document.body.classList.remove("dragging");
+    clearPreview();
+    if (drag.dragging) {
+      suppressBoardClick = true;
+      window.setTimeout(() => { suppressBoardClick = false; }, 300);
+      if (drag.overBoard) placePiece(drag.index, drag.originRow, drag.originCol);
+    }
+  }
+
+  function onBoardClick(event) {
+    if (suppressBoardClick) return;
+    if (locked || selectedIndex < 0) return;
+    const cell = event.target.closest(".board-cell");
+    if (!cell) return;
+    const row = Number(cell.dataset.row);
+    const col = Number(cell.dataset.col);
+    const piece = pieces[selectedIndex];
+    if (piece && !piece.used) placePiece(selectedIndex, row, col);
+  }
+
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./service-worker.js")
+        .catch((error) => console.warn("Не удалось включить офлайн-режим.", error));
+    });
+  }
+
+  createBoardCells();
+  loadSavedSettings();
+  startNewGame();
+  rackElement.addEventListener("pointerdown", onPiecePointerDown);
+  boardElement.addEventListener("click", onBoardClick);
+  window.addEventListener("pointermove", onPointerMove, { passive: false });
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+  document.querySelector("#new-game").addEventListener("click", startNewGame);
+  document.querySelector("#overlay-restart").addEventListener("click", startNewGame);
+  soundButton.addEventListener("click", () => {
+    soundEnabled = !soundEnabled;
+    soundButton.setAttribute("aria-pressed", String(soundEnabled));
+    soundButton.setAttribute("aria-label", soundEnabled ? "Выключить звук" : "Включить звук");
+    saveSettings();
+    if (soundEnabled) playTone(620);
+  });
+  registerServiceWorker();
+})();
