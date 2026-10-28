@@ -288,34 +288,39 @@
 
   function liftPiece(index, clientX, clientY) {
     if (index < 0 || !pieces[index] || pieces[index].used) return;
-    const shape = pieces[index].shape;
-    const rows = shape.map(([row]) => row);
-    const cols = shape.map(([, col]) => col);
-    const anchorRow = Math.floor((Math.min(...rows) + Math.max(...rows)) / 2);
-    const anchorCol = Math.floor((Math.min(...cols) + Math.max(...cols)) / 2);
-    const shapeElement = rackElement.querySelector(
-      `.piece-button[data-index="${index}"] .piece-shape`
-    );
-    if (!shapeElement) return;
+    if (liftedPiece) return;
+
+    const button = rackElement.querySelector(`.piece-button[data-index="${index}"]`);
+    const shapeEl = button ? button.querySelector(".piece-shape") : null;
+    if (!shapeEl) return;
+
+    // Move the original shape element out of the rack into the body,
+    // so the player sees the actual piece (not a faded clone) following the finger.
     const ghost = document.createElement("div");
     ghost.className = "lifted-ghost";
-    ghost.append(shapeElement.cloneNode(true));
+    ghost.append(shapeEl); // moves the original node
+
+    const rows = pieces[index].shape.map(([r]) => r);
+    const cols = pieces[index].shape.map(([, c]) => c);
+    const anchorRow = Math.floor((Math.min(...rows) + Math.max(...rows)) / 2);
+    const anchorCol = Math.floor((Math.min(...cols) + Math.max(...cols)) / 2);
+
     document.body.append(ghost);
-    const rect = ghost.getBoundingClientRect();
+    if (button) button.style.visibility = "hidden";
+
     liftedPiece = {
       index,
-      offsetX: clientX - (rect.left + rect.width / 2),
-      offsetY: clientY - (rect.top + rect.height / 2),
       ghost,
+      sourceButton: button,
       anchorRow,
       anchorCol,
       lastPoint: null
     };
+
     selectPiece(index);
     turnHintElement.textContent = "Ведите пальцем по полю, отпустите для установки";
     updateLiftedGhost(clientX, clientY);
   }
-
   function updateLiftedGhost(clientX, clientY) {
     if (!liftedPiece) return;
     liftedPiece.ghost.style.left = `${clientX}px`;
@@ -332,18 +337,25 @@
     showPreview(originRow, originCol, pieces[liftedPiece.index]);
   }
 
-  function dropLiftedPiece() {
+    function dropLiftedPiece() {
     if (!liftedPiece) return;
     const lifted = liftedPiece;
+    liftedPiece = null;
+
     if (lifted.lastPoint) {
-      placePiece(lifted.index, lifted.lastPoint.originRow, lifted.lastPoint.originCol);
+      const { originRow, originCol } = lifted.lastPoint;
+      placePiece(lifted.index, originRow, originCol);
     }
-    if (liftedPiece) {
-      liftedPiece.ghost.remove();
-      liftedPiece = null;
+
+    if (lifted.ghost && lifted.ghost.parentNode) {
+      lifted.ghost.remove();
+    }
+    if (lifted.sourceButton) {
+      lifted.sourceButton.style.visibility = "";
     }
     clearPreview();
     turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
+    renderPieces();
   }
 
   function updateDragPreview(clientX, clientY) {
@@ -544,8 +556,6 @@
       oscillator.stop(audioContext.currentTime + duration);
     } catch (error) {
       console.warn("Не удалось воспроизвести звук.", error);
-    }
-  }
 
   function placePiece(index, originRow, originCol) {
     if (locked || !pieces[index] || pieces[index].used) return false;
