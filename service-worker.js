@@ -1,4 +1,4 @@
-const CACHE_NAME = "diana-block-v2";
+const CACHE_NAME = "diana-block-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
