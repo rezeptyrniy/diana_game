@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10121b">
+  <meta name="description" content="Спокойная и яркая головоломка с цветными блоками.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Luma Blocks">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./style.css">
+  <title>Luma Blocks — игра в блоки</title>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Luma Blocks, новая игра">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span class="brand-name">Luma <b>Blocks</b></span>
+      </a>
+      <div class="top-actions">
+        <button class="icon-button" id="sound-toggle" type="button" aria-label="Включить звук" title="Звук">
+          <svg class="sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12zm-2.5-9v2.06a7 7 0 0 1 0 13.88V21a9 9 0 0 0 0-18z"/></svg>
+          <svg class="sound-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4zm12.59 3 2.12 2.12-1.42 1.42L15.17 13.4l-2.12 2.13-1.42-1.42L13.75 12l-2.12-2.12 1.42-1.42 2.12 2.12 2.12-2.12 1.42 1.42L16.59 12z"/></svg>
+        </button>
+        <button class="icon-button" id="new-game" type="button" aria-label="Новая игра" title="Новая игра">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.93 9h-2.02A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="score-row" aria-label="Результаты">
+      <div class="score-card current-score">
+        <span class="eyebrow">СЧЁТ</span>
+        <strong id="score">0</strong>
+      </div>
+      <div class="score-card best-score">
+        <span class="eyebrow">РЕКОРД <span class="sparkle" aria-hidden="true">✦</span></span>
+        <strong id="best-score">0</strong>
+      </div>
+    </section>
+
+    <section class="board-wrap" aria-label="Игровое поле">
+      <div class="board-frame">
+        <div class="board" id="board" role="grid" aria-label="Поле 10 на 10"></div>
+        <div class="board-overlay" id="board-overlay" aria-live="polite">
+          <div class="overlay-card">
+            <span class="overlay-icon" id="overlay-icon">✦</span>
+            <h1 id="overlay-title">Партия окончена</h1>
+            <p id="overlay-message">Хорошая игра!</p>
+            <button class="primary-button" id="overlay-restart" type="button">Сыграть ещё</button>
+          </div>
+        </div>
+      </div>
+      <div class="toast" id="toast" aria-live="polite"></div>
+    </section>
+
+    <section class="pieces-section" aria-label="Доступные фигуры">
+      <div class="pieces-heading">
+        <span class="eyebrow">ВАШИ ФИГУРЫ</span>
+        <span class="turn-hint" id="turn-hint">Перетащите на поле или выберите и коснитесь клетки</span>
+      </div>
+      <div class="piece-rack" id="piece-rack"></div>
+    </section>
+
+    <footer class="footer-note">Заполняйте линии и освобождайте место</footer>
+  </main>
+  <script src="./game.js" defer></script>
+</body>
+</html>
