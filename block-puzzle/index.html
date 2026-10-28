@@ -8,19 +8,19 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Luma Blocks">
+  <meta name="apple-mobile-web-app-title" content="Diana Block">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="icon" href="./icons/icon-192.png">
   <link rel="stylesheet" href="./style.css">
-  <title>Luma Blocks — игра в блоки</title>
+  <title>Diana Block — игра в блоки</title>
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <a class="brand" href="./" aria-label="Luma Blocks, новая игра">
+      <a class="brand" href="./" aria-label="Diana Block, новая игра">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-        <span class="brand-name">Luma <b>Blocks</b></span>
+        <span class="brand-name">Diana <b>Block</b></span>
       </a>
       <div class="top-actions">
         <button class="icon-button" id="sound-toggle" type="button" aria-label="Включить звук" title="Звук">
@@ -29,6 +29,9 @@
         </button>
         <button class="icon-button" id="new-game" type="button" aria-label="Новая игра" title="Новая игра">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.93 9h-2.02A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        </button>
+        <button class="icon-button" id="undo" type="button" aria-label="Отменить ход" title="Отменить ход" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 5a7.5 7.5 0 0 0-5.63 2.55L4 4.75V12h7.25L8.1 8.85A5.5 5.5 0 1 1 12.5 18H11v2h1.5a7.5 7.5 0 0 0 0-15z"/></svg>
         </button>
       </div>
     </header>

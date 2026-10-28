@@ -75,6 +75,8 @@ button { font: inherit; }
   transition: background .18s ease, transform .18s ease;
 }
 .icon-button:active { transform: scale(.93); background: var(--panel-light); }
+.icon-button:disabled { opacity: .42; cursor: default; }
+.icon-button:disabled:active { transform: none; background: var(--panel); }
 .icon-button svg { width: 20px; height: 20px; fill: currentColor; }
 .sound-off { display: none; }
 .icon-button[aria-pressed="false"] .sound-on { display: none; }
@@ -104,6 +106,13 @@ button { font: inherit; }
   border-radius: 18px;
   background: #171a26;
   box-shadow: 0 15px 44px #00000028, inset 0 1px #ffffff05;
+}
+.board-frame.shake { animation: shake .4s ease; }
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(6px); }
+  75% { transform: translateX(-6px); }
 }
 .board {
   width: 100%;
@@ -163,6 +172,7 @@ button { font: inherit; }
   background: #22263ae8;
   font-size: 16px;
   font-weight: 800;
+  white-space: pre-line;
   pointer-events: none;
   opacity: 0;
   transform: translate(-50%, 0) scale(.8);
@@ -187,6 +197,7 @@ button { font: inherit; }
 }
 .piece-slot.selected { border-color: #b49bff9c; background: #27233b; box-shadow: inset 0 0 0 1px #b49bff2a, 0 0 16px #9c7cff15; transform: translateY(-2px); }
 .piece-slot.used { visibility: hidden; }
+.piece-slot.dragging-src { opacity: .35; }
 .piece-button {
   position: relative;
   display: grid;
@@ -202,6 +213,7 @@ button { font: inherit; }
 }
 .piece-button:active { cursor: grabbing; }
 .piece-shape { display: grid; gap: 3px; pointer-events: none; }
+.drag-ghost { pointer-events: none; }
 .piece-cell { width: clamp(13px, 3.5vw, 18px); height: clamp(13px, 3.5vw, 18px); border-radius: 4px; background: var(--piece-color); box-shadow: inset 0 1px #ffffff38, 0 2px 5px #00000030; }
 .piece-cell.empty { background: transparent; box-shadow: none; }
 .piece-slot.selected .piece-cell:not(.empty) { filter: brightness(1.13); }

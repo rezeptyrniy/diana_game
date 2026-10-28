@@ -1,4 +1,4 @@
-const CACHE_NAME = "luma-blocks-v1";
+const CACHE_NAME = "diana-block-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -21,7 +21,8 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((names) => Promise.all(names
-        .filter((name) => name.startsWith("luma-blocks-") && name !== CACHE_NAME)
+        .filter((name) => (name.startsWith("diana-block-") || name.startsWith("luma-blocks-"))
+          && name !== CACHE_NAME)
         .map((name) => caches.delete(name))))
       .then(() => self.clients.claim())
   );

@@ -6,7 +6,8 @@
   const SCORE_CONFIG = Object.freeze({
     pointsPerBlock: 10,
     lineBase: 100,
-    extraLineMultiplier: 0.5
+    extraLineMultiplier: 0.5,
+    comboBonus: 150
   });
   const COLORS = ["#9b7cff", "#ff9475", "#5fd1c5", "#f7c85f", "#68a7ff", "#ed78ad"];
   const SHAPES = [
@@ -38,7 +39,9 @@
   const scoreElement = document.querySelector("#score");
   const bestElement = document.querySelector("#best-score");
   const soundButton = document.querySelector("#sound-toggle");
+  const undoButton = document.querySelector("#undo");
   const overlayElement = document.querySelector("#board-overlay");
+  const boardFrameElement = document.querySelector(".board-frame");
   const toastElement = document.querySelector("#toast");
   const turnHintElement = document.querySelector("#turn-hint");
   const cells = [];
@@ -55,6 +58,9 @@
   let suppressBoardClick = false;
   let audioContext = null;
   let toastTimer = 0;
+  let shakeTimer = 0;
+  let savedData = null;
+  let lastSnapshot = null;
 
   function createEmptyBoard() {
     return Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
@@ -63,10 +69,13 @@
   function loadSavedSettings() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-      best = Number.isFinite(saved.best) && saved.best >= 0 ? saved.best : 0;
-      soundEnabled = saved.sound === true;
-      gamesPlayed = Number.isInteger(saved.gamesPlayed) && saved.gamesPlayed >= 0 ? saved.gamesPlayed : 0;
+      savedData = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : null;
+      const settings = savedData || {};
+      best = Number.isFinite(settings.best) && settings.best >= 0 ? settings.best : 0;
+      soundEnabled = settings.sound === true;
+      gamesPlayed = Number.isInteger(settings.gamesPlayed) && settings.gamesPlayed >= 0 ? settings.gamesPlayed : 0;
     } catch (error) {
+      savedData = null;
       console.warn("Не удалось прочитать сохранённые данные игры.", error);
     }
     bestElement.textContent = String(best);
@@ -74,9 +83,50 @@
     soundButton.setAttribute("aria-label", soundEnabled ? "Выключить звук" : "Включить звук");
   }
 
+  function loadSavedGame() {
+    if (!savedData || !Array.isArray(savedData.board) || savedData.board.length !== SIZE
+      || !savedData.board.every((row) => Array.isArray(row) && row.length === SIZE
+        && row.every((cell) => cell === null || COLORS.includes(cell)))
+      || !Array.isArray(savedData.pieces) || savedData.pieces.length !== 3
+      || !savedData.pieces.every((piece) => piece && typeof piece === "object"
+        && Array.isArray(piece.shape)
+        && SHAPES.some((shape) => JSON.stringify(shape) === JSON.stringify(piece.shape))
+        && COLORS.includes(piece.color)
+        && typeof piece.used === "boolean")
+      || !Number.isSafeInteger(savedData.score) || savedData.score < 0) {
+      return false;
+    }
+
+    board = savedData.board.map((row) => row.slice());
+    pieces = savedData.pieces.map((piece) => ({
+      shape: piece.shape.map(([row, col]) => [row, col]),
+      color: piece.color,
+      used: piece.used
+    }));
+    score = savedData.score;
+    selectedIndex = -1;
+    lastSnapshot = null;
+    renderBoard();
+    renderPieces();
+    updateUndoButton();
+    if (pieces.every((piece) => piece.used)) {
+      generatePieces();
+    } else if (!hasAvailableMove()) {
+      endGame();
+    }
+    return true;
+  }
+
   function saveSettings() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ best, sound: soundEnabled, gamesPlayed }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        best,
+        sound: soundEnabled,
+        gamesPlayed,
+        board,
+        pieces,
+        score
+      }));
     } catch (error) {
       console.warn("Не удалось сохранить данные игры.", error);
     }
@@ -112,7 +162,10 @@
   function generatePieces() {
     pieces = Array.from({ length: 3 }, randomPiece);
     selectedIndex = -1;
+    lastSnapshot = null;
     renderPieces();
+    updateUndoButton();
+    saveSettings();
   }
 
   function renderPieces() {
@@ -171,6 +224,10 @@
   function updateScoreDisplay() {
     scoreElement.textContent = String(score);
     bestElement.textContent = String(best);
+  }
+
+  function updateUndoButton() {
+    undoButton.disabled = !lastSnapshot || locked;
   }
 
   function selectPiece(index) {
@@ -280,10 +337,15 @@
     return { rows, cols, clearSet, lineCount: rows.length + cols.length };
   }
 
-  function addPoints(points, showBonus) {
+  function addPoints(points, lineCount) {
     score += points;
     if (score > best) best = score;
-    if (showBonus) showToast(`+${points}`);
+    if (lineCount >= 2) {
+      const combo = lineCount >= 4 ? "Мега!" : lineCount === 3 ? "Тройное!" : "Двойное!";
+      showToast(`${combo}\n+${points}`);
+    } else if (lineCount === 1) {
+      showToast(`+${points}`);
+    }
     updateScoreDisplay();
     saveSettings();
   }
@@ -326,9 +388,16 @@
     if (!canPlace(piece.shape, originRow, originCol)) {
       showPreview(originRow, originCol, piece);
       window.setTimeout(clearPreview, 260);
+      window.clearTimeout(shakeTimer);
+      boardFrameElement.classList.remove("shake");
+      void boardFrameElement.offsetWidth;
+      boardFrameElement.classList.add("shake");
+      shakeTimer = window.setTimeout(() => boardFrameElement.classList.remove("shake"), 400);
+      playTone(180, 0.12);
       return false;
     }
 
+    lastSnapshot = JSON.parse(JSON.stringify({ board, pieces, score }));
     piece.shape.forEach(([row, col]) => {
       board[originRow + row][originCol + col] = piece.color;
     });
@@ -339,12 +408,14 @@
     const bonus = clears.lineCount === 0
       ? 0
       : Math.round(SCORE_CONFIG.lineBase * clears.lineCount
-        * (1 + SCORE_CONFIG.extraLineMultiplier * (clears.lineCount - 1)));
-    addPoints(placedPoints + bonus, clears.lineCount > 0);
+        * (1 + SCORE_CONFIG.extraLineMultiplier * (clears.lineCount - 1)))
+        + (clears.lineCount >= 2 ? SCORE_CONFIG.comboBonus * (clears.lineCount - 1) : 0);
+    addPoints(placedPoints + bonus, clears.lineCount);
     playTone(clears.lineCount > 0 ? 740 : 480, clears.lineCount > 0 ? 0.16 : 0.08);
 
     if (clears.clearSet.size > 0) {
       locked = true;
+      updateUndoButton();
       clears.clearSet.forEach((cellIndex) => cells[cellIndex].classList.add("clearing"));
       window.setTimeout(() => {
         clears.clearSet.forEach((cellIndex) => {
@@ -360,6 +431,7 @@
       finishPlacement();
     }
     renderPieces();
+    saveSettings();
     return true;
   }
 
@@ -370,7 +442,9 @@
     } else {
       renderPieces();
     }
+    updateUndoButton();
     turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
+    saveSettings();
     if (!hasAvailableMove()) endGame();
   }
 
@@ -388,6 +462,7 @@
     locked = false;
     pointerDrag = null;
     selectedIndex = -1;
+    lastSnapshot = null;
     gamesPlayed += 1;
     overlayElement.classList.remove("visible");
     overlayElement.setAttribute("aria-hidden", "true");
@@ -398,6 +473,36 @@
     saveSettings();
   }
 
+  function createDragGhost(button, piece, anchorRow, anchorCol, clientX, clientY) {
+    const sourceShape = button.querySelector(".piece-shape");
+    const anchorCell = sourceShape.querySelector(
+      `.piece-cell[data-row="${anchorRow}"][data-col="${anchorCol}"]`
+    );
+    const shapeRect = sourceShape.getBoundingClientRect();
+    const cellRect = anchorCell.getBoundingClientRect();
+    const offsetX = cellRect.left + cellRect.width / 2 - (shapeRect.left + shapeRect.width / 2);
+    const offsetY = cellRect.top + cellRect.height / 2 - (shapeRect.top + shapeRect.height / 2);
+    const ghost = sourceShape.cloneNode(true);
+    ghost.classList.add("drag-ghost");
+    ghost.style.setProperty("--piece-color", piece.color);
+    ghost.style.position = "fixed";
+    ghost.style.left = `${clientX - offsetX}px`;
+    ghost.style.top = `${clientY - offsetY}px`;
+    ghost.style.pointerEvents = "none";
+    ghost.style.zIndex = "9999";
+    ghost.style.opacity = "0.9";
+    ghost.style.transform = "translate(-50%, -50%)";
+    ghost.style.willChange = "left, top";
+    ghost.style.transition = "none";
+    document.body.append(ghost);
+    return { element: ghost, offsetX, offsetY };
+  }
+
+  function removeDragGhost(drag) {
+    if (drag.ghost && drag.ghost.element.isConnected) drag.ghost.element.remove();
+    if (drag.sourceSlot) drag.sourceSlot.classList.remove("dragging-src");
+  }
+
   function onPiecePointerDown(event) {
     const button = event.target.closest(".piece-button");
     if (!button || event.button !== 0 || locked) return;
@@ -406,23 +511,34 @@
     if (!piece || piece.used) return;
     event.preventDefault();
     const block = event.target.closest(".piece-cell:not(.empty)");
+    const sourceShape = button.querySelector(".piece-shape");
+    const anchorBlock = block || sourceShape.querySelector(".piece-cell:not(.empty)");
+    const anchorRow = Number(anchorBlock.dataset.row);
+    const anchorCol = Number(anchorBlock.dataset.col);
+    const sourceSlot = button.closest(".piece-slot");
+    const ghost = createDragGhost(button, piece, anchorRow, anchorCol, event.clientX, event.clientY);
     pointerDrag = {
       pointerId: event.pointerId,
       index,
       startX: event.clientX,
       startY: event.clientY,
-      anchorRow: block ? Number(block.dataset.row) : 0,
-      anchorCol: block ? Number(block.dataset.col) : 0,
+      anchorRow,
+      anchorCol,
       dragging: false,
       overBoard: false,
       originRow: 0,
-      originCol: 0
+      originCol: 0,
+      ghost,
+      sourceSlot
     };
+    sourceSlot.classList.add("dragging-src");
     selectPiece(index);
   }
 
   function onPointerMove(event) {
     if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+    pointerDrag.ghost.element.style.left = `${event.clientX - pointerDrag.ghost.offsetX}px`;
+    pointerDrag.ghost.element.style.top = `${event.clientY - pointerDrag.ghost.offsetY}px`;
     const delta = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
     if (!pointerDrag.dragging && delta < 6) return;
     pointerDrag.dragging = true;
@@ -436,12 +552,39 @@
     const drag = pointerDrag;
     pointerDrag = null;
     document.body.classList.remove("dragging");
+    removeDragGhost(drag);
     clearPreview();
     if (drag.dragging) {
       suppressBoardClick = true;
       window.setTimeout(() => { suppressBoardClick = false; }, 300);
       if (drag.overBoard) placePiece(drag.index, drag.originRow, drag.originCol);
     }
+  }
+
+  function onPointerCancel(event) {
+    if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+    const drag = pointerDrag;
+    pointerDrag = null;
+    document.body.classList.remove("dragging");
+    removeDragGhost(drag);
+    clearPreview();
+  }
+
+  function undoPlacement() {
+    if (!lastSnapshot || locked) return;
+    board = lastSnapshot.board;
+    pieces = lastSnapshot.pieces;
+    score = lastSnapshot.score;
+    lastSnapshot = null;
+    selectedIndex = -1;
+    overlayElement.classList.remove("visible");
+    overlayElement.setAttribute("aria-hidden", "true");
+    clearPreview();
+    renderBoard();
+    renderPieces();
+    updateUndoButton();
+    turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
+    saveSettings();
   }
 
   function onBoardClick(event) {
@@ -465,13 +608,14 @@
 
   createBoardCells();
   loadSavedSettings();
-  startNewGame();
+  if (!loadSavedGame()) startNewGame();
   rackElement.addEventListener("pointerdown", onPiecePointerDown);
   boardElement.addEventListener("click", onBoardClick);
   window.addEventListener("pointermove", onPointerMove, { passive: false });
   window.addEventListener("pointerup", onPointerUp);
-  window.addEventListener("pointercancel", onPointerUp);
+  window.addEventListener("pointercancel", onPointerCancel);
   document.querySelector("#new-game").addEventListener("click", startNewGame);
+  undoButton.addEventListener("click", undoPlacement);
   document.querySelector("#overlay-restart").addEventListener("click", startNewGame);
   soundButton.addEventListener("click", () => {
     soundEnabled = !soundEnabled;
