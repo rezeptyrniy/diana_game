@@ -85,7 +85,7 @@
   let unlockedAchievements = [];
   let sessionLineCount = 0;
   let sessionComboCount = 0;
-  let tapPreview = null; // { index, anchorRow, anchorCol }
+  let liftedPiece = null; // { index, offsetX, offsetY, ghost, anchorRow, anchorCol, lastPoint }
 
   function createEmptyBoard() {
     return Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
@@ -217,13 +217,6 @@
 
   function selectPiece(index) {
     if (locked || !pieces[index] || pieces[index].used) return;
-    if (selectedIndex === index) {
-      selectedIndex = -1;
-      clearTapPreview();
-      renderPieces();
-      turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
-      return;
-    }
     selectedIndex = index;
     Array.from(rackElement.children).forEach((slot, slotIndex) => {
       slot.classList.toggle("selected", slotIndex === selectedIndex);
@@ -293,40 +286,64 @@
     });
   }
 
-  function showTapPreview(index) {
-    if (index < 0 || pieces[index].used) {
-      clearTapPreview();
-      return;
-    }
+  function liftPiece(index, clientX, clientY) {
+    if (index < 0 || !pieces[index] || pieces[index].used) return;
     const shape = pieces[index].shape;
     const rows = shape.map(([row]) => row);
     const cols = shape.map(([, col]) => col);
-    tapPreview = {
+    const anchorRow = Math.floor((Math.min(...rows) + Math.max(...rows)) / 2);
+    const anchorCol = Math.floor((Math.min(...cols) + Math.max(...cols)) / 2);
+    const shapeElement = rackElement.querySelector(
+      `.piece-button[data-index="${index}"] .piece-shape`
+    );
+    if (!shapeElement) return;
+    const ghost = document.createElement("div");
+    ghost.className = "lifted-ghost";
+    ghost.append(shapeElement.cloneNode(true));
+    document.body.append(ghost);
+    const rect = ghost.getBoundingClientRect();
+    liftedPiece = {
       index,
-      anchorRow: Math.floor((Math.min(...rows) + Math.max(...rows)) / 2),
-      anchorCol: Math.floor((Math.min(...cols) + Math.max(...cols)) / 2)
+      offsetX: clientX - (rect.left + rect.width / 2),
+      offsetY: clientY - (rect.top + rect.height / 2),
+      ghost,
+      anchorRow,
+      anchorCol,
+      lastPoint: null
     };
-    previewTapAtCenter();
-    turnHintElement.textContent = "Коснитесь клетки поля, чтобы поставить фигуру";
+    selectPiece(index);
+    turnHintElement.textContent = "Ведите пальцем по полю, отпустите для установки";
+    updateLiftedGhost(clientX, clientY);
   }
 
-  function previewTapAtCenter() {
-    if (!tapPreview) return;
-    const piece = pieces[tapPreview.index];
-    const height = Math.max(...piece.shape.map(([row]) => row)) + 1;
-    const width = Math.max(...piece.shape.map(([, col]) => col)) + 1;
-    let originRow = Math.floor(SIZE / 2) - tapPreview.anchorRow;
-    let originCol = Math.floor(SIZE / 2) - tapPreview.anchorCol;
-    if (originRow < 0) originRow = 0;
-    if (originRow + height > SIZE) originRow = SIZE - height;
-    if (originCol < 0) originCol = 0;
-    if (originCol + width > SIZE) originCol = SIZE - width;
-    showPreview(originRow, originCol, piece);
+  function updateLiftedGhost(clientX, clientY) {
+    if (!liftedPiece) return;
+    liftedPiece.ghost.style.left = `${clientX}px`;
+    liftedPiece.ghost.style.top = `${clientY}px`;
+    const point = getCellAtPoint(clientX, clientY);
+    if (!point) {
+      liftedPiece.lastPoint = null;
+      clearPreview();
+      return;
+    }
+    const originRow = point.row - liftedPiece.anchorRow;
+    const originCol = point.col - liftedPiece.anchorCol;
+    liftedPiece.lastPoint = { originRow, originCol };
+    showPreview(originRow, originCol, pieces[liftedPiece.index]);
   }
 
-  function clearTapPreview() {
-    tapPreview = null;
+  function dropLiftedPiece() {
+    if (!liftedPiece) return;
+    const lifted = liftedPiece;
+    if (lifted.lastPoint) {
+      placePiece(lifted.index, lifted.lastPoint.originRow, lifted.lastPoint.originCol);
+    }
+    if (liftedPiece) {
+      liftedPiece.ghost.remove();
+      liftedPiece = null;
+    }
     clearPreview();
+    turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
   }
 
   function updateDragPreview(clientX, clientY) {
@@ -532,7 +549,6 @@
 
   function placePiece(index, originRow, originCol) {
     if (locked || !pieces[index] || pieces[index].used) return false;
-    clearTapPreview(); // на случай, если ставим через тап
     const piece = pieces[index];
     if (!canPlace(piece.shape, originRow, originCol)) {
       showPreview(originRow, originCol, piece);
@@ -540,6 +556,7 @@
       return false;
     }
 
+    if (liftedPiece) { liftedPiece.ghost.remove(); liftedPiece = null; }
     piece.shape.forEach(([row, col]) => {
       board[originRow + row][originCol + col] = piece.color;
     });
@@ -610,7 +627,7 @@
     overlayElement.classList.remove("visible");
     overlayElement.setAttribute("aria-hidden", "true");
     clearPreview();
-    clearTapPreview();
+    if (liftedPiece) { liftedPiece.ghost.remove(); liftedPiece = null; }
     renderBoard();
     generatePieces();
     turnHintElement.textContent = "Перетащите на поле или выберите и коснитесь клетки";
@@ -640,10 +657,6 @@
       originCol: 0
     };
     selectPiece(index);
-    // Если это тап (не drag), показываем preview в центре поля
-    // Но drag начнётся только в onPointerMove, поэтому здесь
-    // просто запоминаем, что preview нужно показать при pointerup,
-    // если drag не начался.
   }
 
   function onPointerMove(event) {
@@ -663,16 +676,23 @@
     document.body.classList.remove("dragging");
     clearPreview();
     if (!drag.dragging) {
-      // Это был тап, не drag — показываем preview в центре
-      showTapPreview(drag.index);
-    } else {
-      clearTapPreview();
+      liftPiece(drag.index, event.clientX, event.clientY);
+      const moveHandler = (moveEvent) => updateLiftedGhost(moveEvent.clientX, moveEvent.clientY);
+      const upHandler = (upEvent) => {
+        updateLiftedGhost(upEvent.clientX, upEvent.clientY);
+        suppressBoardClick = true;
+        window.setTimeout(() => { suppressBoardClick = false; }, 300);
+        dropLiftedPiece();
+        window.removeEventListener("pointermove", moveHandler);
+        window.removeEventListener("pointerup", upHandler);
+      };
+      window.addEventListener("pointermove", moveHandler);
+      window.addEventListener("pointerup", upHandler);
+      return;
     }
-    if (drag.dragging) {
-      suppressBoardClick = true;
-      window.setTimeout(() => { suppressBoardClick = false; }, 300);
-      if (drag.overBoard) placePiece(drag.index, drag.originRow, drag.originCol);
-    }
+    suppressBoardClick = true;
+    window.setTimeout(() => { suppressBoardClick = false; }, 300);
+    if (drag.overBoard) placePiece(drag.index, drag.originRow, drag.originCol);
   }
 
   function onBoardClick(event) {
@@ -682,13 +702,6 @@
     if (!cell) return;
     const row = Number(cell.dataset.row);
     const col = Number(cell.dataset.col);
-    if (tapPreview !== null) {
-      const originRow = row - tapPreview.anchorRow;
-      const originCol = col - tapPreview.anchorCol;
-      const placed = placePiece(tapPreview.index, originRow, originCol);
-      if (placed) clearTapPreview();
-      return;
-    }
     if (selectedIndex < 0) return;
     const piece = pieces[selectedIndex];
     if (piece && !piece.used) placePiece(selectedIndex, row, col);

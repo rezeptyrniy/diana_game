@@ -214,6 +214,16 @@ button { font: inherit; }
 .piece-button:active { cursor: grabbing; }
 .piece-shape { display: grid; gap: 3px; pointer-events: none; }
 .drag-ghost { pointer-events: none; }
+.lifted-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.95;
+  transform: translate(-50%, -120%);
+  will-change: left, top;
+  filter: drop-shadow(0 8px 16px rgba(0,0,0,.4));
+}
+.lifted-ghost .piece-cell { width: 22px; height: 22px; }
 .piece-cell { width: clamp(13px, 3.5vw, 18px); height: clamp(13px, 3.5vw, 18px); border-radius: 4px; background: var(--piece-color); box-shadow: inset 0 1px #ffffff38, 0 2px 5px #00000030; }
 .piece-cell.empty { background: transparent; box-shadow: none; }
 .piece-slot.selected .piece-cell:not(.empty) { filter: brightness(1.13); }
