@@ -2,7 +2,7 @@
 
 (() => {
 	const SIZE = 10;
-	const STORAGE_KEY = "luma-blocks-save-v1";
+const STORAGE_KEY = "game-for-diana-save-v1";
 	const SCORE_CONFIG = Object.freeze({
 		pointsPerBlock: 10,
 		lineBase: 100,
